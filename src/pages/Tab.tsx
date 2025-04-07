@@ -1,4 +1,3 @@
-// Note:コンポーネントを分類したため、当コンポーネントは現在不使用
 import { useState, useEffect } from "react";
 
 // タブの定義
@@ -14,7 +13,17 @@ interface UserData {
   age: number;
   gender: string;
   address: string;
-  isDeleted?: boolean; // 削除フラグを追加
+  isDeleted?: boolean; // 削除フラグ
+}
+
+// タブごとのデータを管理する型
+interface AllTabsData {
+  [tabId: string]: UserData[];
+}
+
+// 編集中のデータを管理する型
+interface EditDataByTab {
+  [tabId: string]: { [key: number]: UserData };
 }
 
 const Tab = () => {
@@ -28,23 +37,28 @@ const Tab = () => {
 
   // 状態管理
   const [activeTab, setActiveTab] = useState<string>(tabs[0].id);
-  const [data, setData] = useState<UserData[]>([]);
-  const [editData, setEditData] = useState<{ [key: number]: UserData }>({});
+  const [allTabsData, setAllTabsData] = useState<AllTabsData>({});
+  const [editDataByTab, setEditDataByTab] = useState<EditDataByTab>({});
   const [loading, setLoading] = useState<boolean>(false);
-  const [saving, setSaving] = useState<boolean>(false); // 保存中状態を追加
-  const [nextId, setNextId] = useState<number>(100); // 新規レコードのID開始値
-  const [isModified, setIsModified] = useState<boolean>(false); // データ変更フラグ
+  const [saving, setSaving] = useState<boolean>(false);
+  const [nextIds, setNextIds] = useState<{ [tabId: string]: number }>({});
+  const [isModifiedByTab, setIsModifiedByTab] = useState<{
+    [tabId: string]: boolean;
+  }>({});
+  const [initialDataFetched, setInitialDataFetched] = useState<boolean>(false);
 
-  // タブ切り替え時のデータ取得
+  // 初期表示時に全タブのデータを一度に取得
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchAllData = async () => {
+      if (initialDataFetched) return; // 既にデータ取得済みの場合は何もしない
+
       setLoading(true);
       try {
-        // 実際の実装ではここでAPIリクエスト
-        // 例: const response = await fetch(`/api/master/${activeTab}`);
+        // 実際の実装ではここで全タブのデータを一度に取得するAPIリクエスト
+        // 例: const response = await fetch('/api/master/all');
 
         // モックデータ（実際の実装では削除）
-        const mockData: Record<string, UserData[]> = {
+        const mockData: AllTabsData = {
           tabA: [
             {
               id: 1,
@@ -121,51 +135,56 @@ const Tab = () => {
 
         // モックデータを使用（実際の実装では削除）
         setTimeout(() => {
-          const newData = mockData[activeTab] || [];
-          setData(newData);
+          // 全タブのデータをセット
+          setAllTabsData(mockData);
 
           // 編集用データの初期化
-          const newEditData: { [key: number]: UserData } = {};
-          newData.forEach((item) => {
-            newEditData[item.id] = { ...item };
+          const newEditDataByTab: EditDataByTab = {};
+          const newNextIds: { [tabId: string]: number } = {};
+          const newIsModifiedByTab: { [tabId: string]: boolean } = {};
+
+          // 各タブごとに初期化
+          Object.keys(mockData).forEach((tabId) => {
+            // 編集用データの作成
+            newEditDataByTab[tabId] = {};
+            mockData[tabId].forEach((item) => {
+              newEditDataByTab[tabId][item.id] = { ...item };
+            });
+
+            // 次のIDを設定
+            const maxId = mockData[tabId].reduce(
+              (max, item) => Math.max(max, item.id),
+              0
+            );
+            newNextIds[tabId] = maxId + 1;
+
+            // 変更フラグの初期化
+            newIsModifiedByTab[tabId] = false;
           });
-          setEditData(newEditData);
 
+          setEditDataByTab(newEditDataByTab);
+          setNextIds(newNextIds);
+          setIsModifiedByTab(newIsModifiedByTab);
           setLoading(false);
-          setIsModified(false); // 新しいデータを読み込んだので変更フラグをリセット
+          setInitialDataFetched(true); // データ取得完了フラグをセット
 
-          // 次のIDを設定（実際の実装では不要かも）
-          const maxId = newData.reduce(
-            (max, item) => Math.max(max, item.id),
-            0
-          );
-          setNextId(maxId + 1);
-        }, 500);
-
-        // 実際の実装ではこのようにAPI応答を処理
-        // const result = await response.json();
-        // setData(result);
-        // const newEditData: { [key: number]: UserData } = {};
-        // result.forEach(item => {
-        //   newEditData[item.id] = { ...item };
-        // });
-        // setEditData(newEditData);
-        // setIsModified(false); // 新しいデータを読み込んだので変更フラグをリセット
-        // const maxId = result.reduce((max, item) => Math.max(max, item.id), 0);
-        // setNextId(maxId + 1);
+          // 実際の実装ではこのようにAPI応答を処理
+          // const result = await response.json();
+          // setAllTabsData(result);
+          // ... 同様の処理 ...
+        }, 800);
       } catch (error) {
         console.error("データ取得エラー:", error);
-      } finally {
-        // setLoading(false); // 実際の実装ではここでローディングを解除
+        setLoading(false);
       }
     };
 
-    fetchData();
-  }, [activeTab]);
+    fetchAllData();
+  }, [initialDataFetched]);
 
   // タブ切り替え前の確認
   const handleTabChange = (newTabId: string) => {
-    if (isModified) {
+    if (isModifiedByTab[activeTab]) {
       const confirmed = window.confirm(
         "変更内容が保存されていません。保存せずに移動しますか？"
       );
@@ -180,14 +199,20 @@ const Tab = () => {
     field: keyof UserData,
     value: string | number | boolean
   ) => {
-    setEditData((prev) => ({
+    setEditDataByTab((prev) => ({
       ...prev,
-      [id]: {
-        ...prev[id],
-        [field]: value,
+      [activeTab]: {
+        ...prev[activeTab],
+        [id]: {
+          ...prev[activeTab][id],
+          [field]: value,
+        },
       },
     }));
-    setIsModified(true); // 変更フラグを立てる
+    setIsModifiedByTab((prev) => ({
+      ...prev,
+      [activeTab]: true,
+    }));
   };
 
   // 全データ保存ハンドラ
@@ -195,7 +220,7 @@ const Tab = () => {
     setSaving(true);
     try {
       // 現在のタブの全データを取得（削除されたものも含む）
-      const currentData = Object.values(editData);
+      const currentData = Object.values(editDataByTab[activeTab]);
 
       console.log("保存対象データ:", JSON.stringify(currentData, null, 2));
 
@@ -213,9 +238,17 @@ const Tab = () => {
 
       // 成功したら更新
       setTimeout(() => {
-        // データを更新
-        setData(currentData);
-        setIsModified(false); // 変更フラグをリセット
+        // allTabsDataを更新
+        setAllTabsData((prev) => ({
+          ...prev,
+          [activeTab]: currentData,
+        }));
+
+        setIsModifiedByTab((prev) => ({
+          ...prev,
+          [activeTab]: false,
+        }));
+
         setSaving(false);
         alert(`${activeTab.replace("tab", "タブ ")} のデータを保存しました`);
       }, 800);
@@ -229,7 +262,7 @@ const Tab = () => {
   // 削除フラグの切り替えハンドラ
   const toggleDeleteFlag = async (id: number) => {
     try {
-      const currentIsDeleted = editData[id]?.isDeleted || false;
+      const currentIsDeleted = editDataByTab[activeTab][id]?.isDeleted || false;
       const newIsDeleted = !currentIsDeleted;
 
       // 編集データを更新
@@ -249,25 +282,41 @@ const Tab = () => {
   // 新規レコード追加ハンドラ
   const handleAddRecord = async () => {
     try {
+      const newId = nextIds[activeTab];
       const newRecord: UserData = {
-        id: nextId,
-        name: `新規ユーザー_${nextId}`,
+        id: newId,
+        name: `新規ユーザー_${newId}`,
         age: 20,
         gender: "未設定",
         address: "",
         isDeleted: false,
       };
 
-      // データとeditDataを更新
-      setData((prev) => [...prev, newRecord]);
-      setEditData((prev) => ({
+      // allTabsDataとeditDataByTabを更新
+      setAllTabsData((prev) => ({
         ...prev,
-        [newRecord.id]: newRecord,
+        [activeTab]: [...(prev[activeTab] || []), newRecord],
+      }));
+
+      setEditDataByTab((prev) => ({
+        ...prev,
+        [activeTab]: {
+          ...(prev[activeTab] || {}),
+          [newRecord.id]: newRecord,
+        },
       }));
 
       // 次のID更新
-      setNextId((prev) => prev + 1);
-      setIsModified(true); // 変更フラグを立てる
+      setNextIds((prev) => ({
+        ...prev,
+        [activeTab]: prev[activeTab] + 1,
+      }));
+
+      // 変更フラグを立てる
+      setIsModifiedByTab((prev) => ({
+        ...prev,
+        [activeTab]: true,
+      }));
 
       alert("新しいレコードを追加しました（保存するまで反映されません）");
     } catch (error) {
@@ -275,6 +324,10 @@ const Tab = () => {
       alert("レコードの追加に失敗しました");
     }
   };
+
+  // 現在のタブのデータを取得
+  const currentTabData = allTabsData[activeTab] || [];
+  const isModified = isModifiedByTab[activeTab] || false;
 
   // 色スキームを無効化するスタイル
   const colorSchemeStyle = `
@@ -318,6 +371,7 @@ const Tab = () => {
             <button
               className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
               onClick={handleAddRecord}
+              disabled={loading}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -340,7 +394,7 @@ const Tab = () => {
                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
               onClick={handleSaveAll}
-              disabled={!isModified || saving}
+              disabled={!isModified || saving || loading}
             >
               {saving ? (
                 <>
@@ -400,15 +454,16 @@ const Tab = () => {
                   </div>
                 </td>
               </tr>
-            ) : data.length === 0 ? (
+            ) : currentTabData.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
                   データがありません
                 </td>
               </tr>
             ) : (
-              data.map((item) => {
-                const isDeleted = editData[item.id]?.isDeleted || false;
+              currentTabData.map((item) => {
+                const isDeleted =
+                  editDataByTab[activeTab]?.[item.id]?.isDeleted || false;
                 return (
                   <tr
                     key={item.id}
@@ -431,7 +486,7 @@ const Tab = () => {
                             ? "bg-gray-100 text-gray-500"
                             : "bg-white text-black"
                         }`}
-                        value={editData[item.id]?.name || ""}
+                        value={editDataByTab[activeTab]?.[item.id]?.name || ""}
                         onChange={(e) =>
                           handleChange(item.id, "name", e.target.value)
                         }
@@ -446,7 +501,7 @@ const Tab = () => {
                             ? "bg-gray-100 text-gray-500"
                             : "bg-white text-black"
                         }`}
-                        value={editData[item.id]?.age || ""}
+                        value={editDataByTab[activeTab]?.[item.id]?.age || ""}
                         onChange={(e) =>
                           handleChange(
                             item.id,
@@ -464,7 +519,9 @@ const Tab = () => {
                             ? "bg-gray-100 text-gray-500"
                             : "bg-white text-black"
                         }`}
-                        value={editData[item.id]?.gender || ""}
+                        value={
+                          editDataByTab[activeTab]?.[item.id]?.gender || ""
+                        }
                         onChange={(e) =>
                           handleChange(item.id, "gender", e.target.value)
                         }
@@ -484,7 +541,9 @@ const Tab = () => {
                             ? "bg-gray-100 text-gray-500"
                             : "bg-white text-black"
                         }`}
-                        value={editData[item.id]?.address || ""}
+                        value={
+                          editDataByTab[activeTab]?.[item.id]?.address || ""
+                        }
                         onChange={(e) =>
                           handleChange(item.id, "address", e.target.value)
                         }
